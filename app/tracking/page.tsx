@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import AppLayout from '../components/layout/AppLayout';
 import {
   Search,
@@ -14,6 +14,8 @@ import {
   Star,
   Calendar,
 } from 'lucide-react';
+
+import LiveMap from './LiveMap';
 
 interface TrackingOrder {
   id: string;
@@ -45,6 +47,15 @@ interface OrderHistoryItem {
   type: string;
   date: string;
   status: string;
+}
+
+interface PickupData {
+  riderId: number;
+  pickupAddress: string;
+  pickupCoordinates?: {
+    lat: number;
+    lng: number;
+  };
 }
 
 export default function TrackingPage() {
@@ -331,15 +342,37 @@ export default function TrackingPage() {
     timeline: OrderTimelineStep[];
     agent: AgentInfo;
   }) {
+    const [pickupData, setPickupData] = useState<PickupData | null>(null);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+      const fetchPickupData = async () => {
+        try {
+          const response = await fetch(`/api/v1/pickups/tracking/${orderId}`);
+          if (response.ok) {
+            const data = await response.json();
+            setPickupData(data.data);
+          }
+        } catch (error) {
+          console.error('Error fetching pickup:', error);
+        } finally {
+          setLoading(false);
+        }
+      };
+      fetchPickupData();
+    }, [orderId]);
+
+    if (loading) {
+      return <div className="text-center text-white">Loading tracking data...</div>;
+    }
+
     return (
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        {/* Order Timeline */}
         <div className="rounded-xl border border-[#A5D6A74D] bg-black p-6 lg:col-span-2">
           <h3 className="font-space-grotesk mb-6 flex items-center gap-2 font-semibold text-white">
             <Clock className="h-5 w-5" />
             Order Timeline - {orderId}
           </h3>
-
           <div className="space-y-6">
             {timeline.map((step, index) => (
               <div key={index} className="flex gap-4">
@@ -361,18 +394,13 @@ export default function TrackingPage() {
                   </div>
                   {index < timeline.length - 1 && (
                     <div
-                      className={`mt-2 h-8 w-0.5 ${
-                        step.completed ? 'bg-green-500' : 'bg-gray-600'
-                      }`}
+                      className={`mt-2 h-8 w-0.5 ${step.completed ? 'bg-green-500' : 'bg-gray-600'}`}
                     />
                   )}
                 </div>
-
                 <div className="flex-1 pb-8">
                   <h4
-                    className={`font-medium ${
-                      step.completed || step.current ? 'text-white' : 'text-gray-400'
-                    }`}
+                    className={`font-medium ${step.completed || step.current ? 'text-white' : 'text-gray-400'}`}
                   >
                     {step.title}
                   </h4>
@@ -384,15 +412,12 @@ export default function TrackingPage() {
           </div>
         </div>
 
-        {/* Agent Info & Live Location */}
         <div className="space-y-6">
-          {/* Assigned Agent */}
           <div className="rounded-xl border border-[#A5D6A74D] bg-black p-6">
             <h3 className="font-space-grotesk mb-4 flex items-center gap-2 font-semibold text-white">
               <User className="h-5 w-5" />
               Assigned Agent
             </h3>
-
             <div className="mb-4 flex items-center gap-3">
               <div className="flex h-12 w-12 items-center justify-center rounded-full bg-green-500">
                 <User className="h-6 w-6 text-white" />
@@ -406,68 +431,39 @@ export default function TrackingPage() {
                 </div>
               </div>
             </div>
-
             <div className="grid grid-cols-2 gap-2">
-              <button className="flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700">
+              <button className="flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white">
                 <Phone className="h-4 w-4" />
-                Call Agent
+                Call
               </button>
-              <button className="rounded-lg bg-green-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-green-700">
+              <button className="rounded-lg bg-green-600 px-3 py-2 text-sm font-medium text-white">
                 Message
               </button>
             </div>
           </div>
 
-          {/* Live Location */}
           <div className="rounded-xl border border-[#A5D6A74D] bg-black p-6">
             <h3 className="font-space-grotesk mb-4 flex items-center gap-2 font-semibold text-white">
               <MapPin className="h-5 w-5" />
               Live Location
             </h3>
-
-            {/* Mock Map */}
-            <div className="mb-4 flex h-48 items-center justify-center rounded-lg bg-gray-200">
-              <div className="text-center">
-                <MapPin className="mx-auto mb-2 h-8 w-8 text-gray-400" />
-                <p className="text-sm text-gray-500">Interactive Map</p>
-              </div>
+            <div className="h-48 overflow-hidden rounded-lg">
+              {pickupData && (
+                <LiveMap
+                  riderId={pickupData.riderId}
+                  pickupAddress={pickupData.pickupAddress}
+                  pickupCoordinates={pickupData.pickupCoordinates}
+                />
+              )}
             </div>
-
-            <div className="space-y-2 text-sm">
+            <div className="mt-4 space-y-2 text-sm">
               <div className="flex justify-between">
-                <span className="text-gray-400">Current Location:</span>
-                <span className="text-white">Victoria Island, Lagos</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">Destination:</span>
-                <span className="text-white">Nigerian Air Force Base, Ikeja, Lagos State</span>
+                <span className="text-gray-400">Current:</span>
+                <span className="text-white">Victoria Island</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-400">ETA:</span>
-                <span className="font-medium text-green-400">15:00</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Order Summary */}
-          <div className="rounded-xl border border-[#A5D6A74D] bg-black p-6">
-            <h3 className="font-space-grotesk mb-4 flex items-center gap-2 font-semibold text-white">
-              <Package className="h-5 w-5" />
-              Order Summary
-            </h3>
-
-            <div className="space-y-3 text-sm">
-              <div className="flex justify-between">
-                <span className="text-gray-400">Category:</span>
-                <span className="text-white">Plastic Bottles & Containers</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">Weight:</span>
-                <span className="text-white">3.2kg</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">Estimated Earnings:</span>
-                <span className="font-medium text-green-400">₦38.40</span>
+                <span className="font-medium text-green-400">15 min</span>
               </div>
             </div>
           </div>

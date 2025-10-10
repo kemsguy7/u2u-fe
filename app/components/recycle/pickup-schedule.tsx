@@ -1,7 +1,9 @@
 'use client';
-import { useState } from 'react';
-import { Calendar, Bike, Car, Truck, Info } from 'lucide-react';
+
+import { useState, useEffect } from 'react';
 import type { RecycleFormData } from '../../recycle/page';
+import { Truck, MapPin, Loader2, AlertCircle } from 'lucide-react';
+import { calculateVehicleType } from '../../utils/vehicleCalculator';
 
 interface PickupScheduleProps {
   formData: RecycleFormData;
@@ -10,88 +12,18 @@ interface PickupScheduleProps {
   onBack: () => void;
 }
 
-interface Vehicle {
-  id: string;
+interface RiderOption {
+  riderId: number;
   name: string;
-  icon: React.ReactNode;
-  price: number;
-  minWeight?: number;
+  phoneNumber: string;
+  vehicleNumber: string;
+  vehicleType: string;
+  capacity: number;
+  profileImage?: string;
+  distance?: number;
+  duration?: number;
+  eta?: string;
 }
-
-interface Driver {
-  id: string;
-  name: string;
-  rating: number;
-  distance: string;
-  price: number;
-  estimatedTime: string;
-}
-
-const vehicles: Vehicle[] = [
-  {
-    id: 'bike',
-    name: 'Bike',
-    icon: <Bike className="h-5 w-5" />,
-    price: 500,
-    minWeight: 0,
-  },
-  {
-    id: 'car',
-    name: 'Car',
-    icon: <Car className="h-5 w-5" />,
-    price: 1000,
-    minWeight: 0,
-  },
-  {
-    id: 'van',
-    name: 'Van',
-    icon: <Truck className="h-5 w-5" />,
-    price: 2000,
-    minWeight: 0,
-  },
-  {
-    id: 'truck',
-    name: 'Truck',
-    icon: <Truck className="h-5 w-5" />,
-    price: 3000,
-    minWeight: 0,
-  },
-];
-
-const availableDrivers: Driver[] = [
-  {
-    id: '1',
-    name: 'Samuel O.',
-    rating: 4.8,
-    distance: '2.1km away',
-    price: 500,
-    estimatedTime: '15-20 mins',
-  },
-  {
-    id: '2',
-    name: 'Jane A.',
-    rating: 4.9,
-    distance: '3.5km away',
-    price: 1000,
-    estimatedTime: '20-25 mins',
-  },
-  {
-    id: '3',
-    name: 'Emeka T.',
-    rating: 4.7,
-    distance: '5.0km away',
-    price: 2000,
-    estimatedTime: '25-30 mins',
-  },
-  {
-    id: '4',
-    name: 'Kofi M.',
-    rating: 4.6,
-    distance: '7.2km away',
-    price: 3000,
-    estimatedTime: '30-35 mins',
-  },
-];
 
 export default function PickupSchedule({
   formData,
@@ -99,253 +31,340 @@ export default function PickupSchedule({
   onSubmit,
   onBack,
 }: PickupScheduleProps) {
-  const [country, setCountry] = useState('Nigeria');
-  const [address, setAddress] = useState(formData.address || 'Test Address, Lagos, Nigeria');
-  const [date, setDate] = useState(formData.date || new Date().toISOString().split('T')[0]);
-  const [time, setTime] = useState(formData.time || '10:00');
-  const [selectedVehicle, setSelectedVehicle] = useState<'bike' | 'car' | 'truck' | undefined>(
-    formData.selectedVehicle || 'car',
-  );
-  const [selectedDriver, setSelectedDriver] = useState<string>(formData.selectedDriver || '1');
-  const [showDrivers, setShowDrivers] = useState(true); // Always show for testing
+  const [address, setAddress] = useState(formData.address);
+  const [date, setDate] = useState(formData.date);
+  const [time, setTime] = useState(formData.time);
 
-  console.log(showDrivers);
-  // Mock weight from category (in real app, this would come from previous step)
-  const estimatedWeight = parseFloat(formData.weight) || 2.5; // kg
+  // Rider selection state
+  const [availableRiders, setAvailableRiders] = useState<RiderOption[]>([]);
+  const [selectedRider, setSelectedRider] = useState<number | null>(null);
+  const [isLoadingRiders, setIsLoadingRiders] = useState(false);
+  const [ridersError, setRidersError] = useState('');
+  const [vehicleType, setVehicleType] = useState('');
 
-  const handleVehicleSelect = (vehicleId: string) => {
-    setSelectedVehicle(vehicleId as 'bike' | 'car' | 'truck');
-    setShowDrivers(true);
-    // Auto-select first driver for testing
-    if (!selectedDriver) {
-      setSelectedDriver('1');
+  console.log(setTime, setDate);
+
+  // Fetch riders when address is entered
+  useEffect(() => {
+    if (address && address.length > 10) {
+      fetchNearestRiders();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [address]);
+
+  const fetchNearestRiders = async () => {
+    if (!formData.weight || !formData.category) {
+      setRidersError('Please complete item details first');
+      return;
+    }
+
+    setIsLoadingRiders(true);
+    setRidersError('');
+    setAvailableRiders([]);
+
+    try {
+      const weight = parseFloat(formData.weight);
+      const calculatedVehicleType = calculateVehicleType(weight);
+      setVehicleType(calculatedVehicleType);
+
+      const response = await fetch('/api/v1/pickups/find-riders', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          pickupAddress: address,
+          itemWeight: weight,
+          country: 'Nigeria', // TODO: Get from user profile or form
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to find riders');
+      }
+
+      if (data.data.riders.length === 0) {
+        setRidersError(
+          'No available riders found in your area. Please try again later or contact support.',
+        );
+      } else {
+        setAvailableRiders(data.data.riders);
+      }
+    } catch (error) {
+      console.error('Error fetching riders:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      setRidersError(errorMessage || 'Failed to load available riders');
+    } finally {
+      setIsLoadingRiders(false);
     }
   };
 
-  const handleDriverSelect = (driverId: string) => {
-    setSelectedDriver(driverId);
+  const handleRiderSelect = (riderId: number) => {
+    setSelectedRider(riderId);
+    const rider = availableRiders.find((r) => r.riderId === riderId);
+    if (rider) {
+      updateFormData({
+        selectedDriver: rider.name,
+        selectedVehicle: rider.vehicleType.toLowerCase() as 'bike' | 'car' | 'truck',
+      });
+    }
   };
 
-  const handleSubmit = () => {
-    updateFormData({
-      address,
-      date,
-      time,
-      selectedVehicle,
-      selectedDriver,
-    });
+  const handleContinue = () => {
+    if (!address || !selectedRider) {
+      alert('Please enter pickup address and select a rider');
+      return;
+    }
+
+    updateFormData({ address, date, time });
     onSubmit();
   };
 
-  // Relaxed validation for testing - only require basic selections
-  const isFormValid = selectedVehicle && selectedDriver;
+  const getVehicleIcon = (type: string) => {
+    switch (type.toLowerCase()) {
+      case 'bike':
+        return '🏍️';
+      case 'car':
+        return '🚗';
+      case 'van':
+        return '🚐';
+      case 'truck':
+        return '🚚';
+      default:
+        return '🚗';
+    }
+  };
 
   return (
     <div className="mx-auto max-w-6xl">
-      <div className="rounded-2xl border border-slate-700/50 bg-slate-800/50 p-6 backdrop-blur-sm lg:p-8">
+      <div className="rounded-2xl border border-slate-700/50 bg-white/10 p-8 backdrop-blur-sm">
         <div className="mb-6 flex items-center">
           <div className="mr-3 flex h-8 w-8 items-center justify-center rounded-full bg-blue-500">
-            <Calendar className="h-4 w-4 text-white" />
+            <span className="font-inter text-sm font-semibold text-white">3</span>
           </div>
-          <h2 className="font-space-grotesk text-xl font-semibold text-blue-400">
-            Schedule Pickup
-          </h2>
+          <h2 className="font-inter text-info text-lg font-medium">Schedule Pickup</h2>
         </div>
 
-        {/* Testing Notice */}
-        <div className="mb-6 rounded-lg border border-blue-500/30 bg-blue-500/10 p-4">
-          <div className="flex items-center gap-2">
-            <Info className="h-5 w-5 flex-shrink-0 text-blue-400" />
-            <p className="font-inter text-sm text-blue-400">
-              🧪 Testing Mode: Just select a vehicle and driver to proceed. Full pickup integration
-              coming soon!
-            </p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:gap-8">
-          {/* Left Column - Form */}
+        <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
+          {/* Left Column - Pickup Details */}
           <div className="space-y-6 lg:col-span-2">
-            {/* Country Selection - Pre-filled for testing */}
-            <div>
-              <label className="font-inter mb-2 block font-medium text-white">
-                Select Country *
-              </label>
-              <select
-                value={country}
-                onChange={(e) => setCountry(e.target.value)}
-                className="w-full rounded-lg border border-slate-600 bg-slate-700/50 px-4 py-3 text-white transition-colors focus:border-green-500 focus:outline-none"
-              >
-                <option value="Nigeria">Nigeria</option>
-                <option value="Ghana">Ghana</option>
-                <option value="Kenya">Kenya</option>
-              </select>
-            </div>
-
-            {/* Address - Pre-filled for testing */}
+            {/* Pickup Address */}
             <div>
               <label className="font-inter mb-2 block font-medium text-white">
                 Pickup Address *
               </label>
-              <textarea
-                rows={3}
-                placeholder="Enter your full address including landmarks"
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                className="w-full resize-none rounded-lg border border-slate-600 bg-slate-700/50 px-4 py-3 text-white placeholder-gray-400 transition-colors focus:border-green-500 focus:outline-none"
-              />
-              <p className="mt-1 text-xs text-gray-400">
-                Pre-filled for testing. You can modify if needed.
+              <div className="relative">
+                <MapPin className="absolute top-1/2 left-3 h-5 w-5 -translate-y-1/2 transform text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Enter your full address"
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  className="font-inter secondary-text w-full rounded-lg border border-white py-3 pr-4 pl-10 text-base font-normal transition-colors focus:border-green-500 focus:outline-none"
+                />
+              </div>
+              <p className="font-inter mt-1 text-xs text-gray-400">
+                Be as specific as possible for accurate rider matching
               </p>
             </div>
 
-            {/* Date & Time - Pre-filled for testing */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="font-inter mb-2 block font-medium text-white">Date</label>
-                <input
-                  type="date"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  className="w-full rounded-lg border border-slate-600 bg-slate-700/50 px-4 py-3 text-white transition-colors focus:border-green-500 focus:outline-none"
-                />
+            {/* Required Vehicle Type Display */}
+            {vehicleType && (
+              <div className="rounded-lg border border-green-500/30 bg-green-500/10 p-4">
+                <div className="flex items-center gap-2">
+                  <Truck className="h-5 w-5 text-green-400" />
+                  <p className="font-inter text-sm text-green-400">
+                    Required Vehicle: <span className="font-semibold">{vehicleType}</span> (based on{' '}
+                    {formData.weight}kg weight)
+                  </p>
+                </div>
               </div>
-              <div>
-                <label className="font-inter mb-2 block font-medium text-white">Time</label>
-                <input
-                  type="time"
-                  value={time}
-                  onChange={(e) => setTime(e.target.value)}
-                  className="w-full rounded-lg border border-slate-600 bg-slate-700/50 px-4 py-3 text-white transition-colors focus:border-green-500 focus:outline-none"
-                />
-              </div>
-            </div>
+            )}
 
-            {/* Vehicle Selection */}
+            {/* Rider Selection */}
             <div>
-              <label className="font-inter mb-2 block font-medium text-white">
-                Select Vehicle (with price) *
-              </label>
-              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                {vehicles.map((vehicle) => {
-                  const isDisabled = estimatedWeight > 10 && vehicle.id === 'bike';
-                  return (
-                    <button
-                      key={vehicle.id}
-                      onClick={() => !isDisabled && handleVehicleSelect(vehicle.id)}
-                      disabled={isDisabled}
-                      className={`flex flex-col items-center gap-2 rounded-lg border p-4 transition-all duration-200 ${
-                        selectedVehicle === vehicle.id
-                          ? 'border-green-500 bg-green-500/20 text-green-400'
-                          : isDisabled
-                            ? 'cursor-not-allowed border-slate-600/50 bg-slate-700/30 text-slate-500'
-                            : 'border-slate-600 bg-slate-700/50 text-white hover:border-green-500/50 hover:bg-green-500/10'
+              <h3 className="font-space-grotesk mb-4 font-semibold text-white">
+                Select Your Rider
+              </h3>
+
+              {/* Loading State */}
+              {isLoadingRiders && (
+                <div className="rounded-xl border border-slate-700/50 bg-slate-800/50 p-8 text-center">
+                  <Loader2 className="mx-auto mb-4 h-12 w-12 animate-spin text-green-400" />
+                  <p className="font-inter text-gray-300">Finding nearest available riders...</p>
+                </div>
+              )}
+
+              {/* Error State */}
+              {ridersError && !isLoadingRiders && (
+                <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-6">
+                  <div className="flex items-center gap-3">
+                    <AlertCircle className="h-6 w-6 text-red-400" />
+                    <div>
+                      <p className="font-inter font-medium text-red-400">No Riders Available</p>
+                      <p className="font-inter text-sm text-red-300">{ridersError}</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={fetchNearestRiders}
+                    className="font-inter mt-4 rounded-lg bg-red-500 px-4 py-2 text-white transition-colors hover:bg-red-600"
+                  >
+                    Try Again
+                  </button>
+                </div>
+              )}
+
+              {/* Riders List */}
+              {!isLoadingRiders && availableRiders.length > 0 && (
+                <div className="space-y-4">
+                  {availableRiders.map((rider, index) => (
+                    <div
+                      key={rider.riderId}
+                      onClick={() => handleRiderSelect(rider.riderId)}
+                      className={`cursor-pointer rounded-xl border-2 p-4 transition-all duration-200 ${
+                        selectedRider === rider.riderId
+                          ? 'border-green-500 bg-green-500/20'
+                          : 'border-slate-600/50 bg-slate-800/50 hover:border-green-500/50 hover:bg-slate-800/70'
                       }`}
                     >
-                      {vehicle.icon}
-                      <span className="text-sm font-medium">{vehicle.name}</span>
-                      <span className="text-xs">₦{vehicle.price.toLocaleString()}</span>
-                    </button>
-                  );
-                })}
-              </div>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                          {/* Rider Avatar */}
+                          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-green-500 text-xl">
+                            {rider.profileImage ? (
+                              <img
+                                src={`https://ipfs.io/ipfs/${rider.profileImage}`}
+                                alt={rider.name}
+                                className="h-full w-full rounded-full object-cover"
+                              />
+                            ) : (
+                              <span className="text-white">{rider.name.charAt(0)}</span>
+                            )}
+                          </div>
 
-              {/* Success message */}
-              {selectedVehicle && (
-                <div className="mt-3 flex items-center gap-2 rounded-lg border border-green-500/30 bg-green-500/10 p-3">
-                  <Info className="h-5 w-5 flex-shrink-0 text-green-400" />
-                  <p className="font-inter text-sm text-green-400">
-                    {vehicles.find((v) => v.id === selectedVehicle)?.name} selected successfully.
-                    Please choose a rider below.
+                          {/* Rider Info */}
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <h4 className="font-space-grotesk font-semibold text-white">
+                                {rider.name}
+                              </h4>
+                              {index === 0 && (
+                                <span className="rounded bg-green-500 px-2 py-0.5 text-xs font-medium text-black">
+                                  Closest
+                                </span>
+                              )}
+                            </div>
+                            <div className="font-inter mt-1 flex items-center gap-3 text-sm text-gray-400">
+                              <span className="flex items-center gap-1">
+                                {getVehicleIcon(rider.vehicleType)} {rider.vehicleType}
+                              </span>
+                              <span>•</span>
+                              <span>{rider.capacity}kg capacity</span>
+                              <span>•</span>
+                              <span>{rider.vehicleNumber}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* ETA & Distance */}
+                        <div className="text-right">
+                          <p className="font-space-grotesk text-lg font-bold text-green-400">
+                            {rider.eta || 'N/A'}
+                          </p>
+                          <p className="font-inter text-xs text-gray-400">
+                            {rider.distance ? `${(rider.distance / 1000).toFixed(1)}km away` : ''}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Selected Indicator */}
+                      {selectedRider === rider.riderId && (
+                        <div className="mt-3 flex items-center gap-2 rounded-lg bg-green-500/10 p-2">
+                          <div className="flex h-5 w-5 items-center justify-center rounded-full bg-green-500">
+                            <svg
+                              className="h-3 w-3 text-white"
+                              fill="currentColor"
+                              viewBox="0 0 20 20"
+                            >
+                              <path
+                                fillRule="evenodd"
+                                d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                                clipRule="evenodd"
+                              />
+                            </svg>
+                          </div>
+                          <span className="font-inter text-sm text-green-400">
+                            Selected - This rider will be assigned to your pickup
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* No Address Entered */}
+              {!address && !isLoadingRiders && (
+                <div className="rounded-xl border border-slate-700/50 bg-slate-800/50 p-6 text-center">
+                  <MapPin className="mx-auto mb-2 h-8 w-8 text-gray-400" />
+                  <p className="font-inter text-gray-400">
+                    Enter your pickup address above to see available riders
                   </p>
                 </div>
               )}
             </div>
-
-            {/* Available Drivers - Always show if vehicle selected */}
-            {selectedVehicle && (
-              <div>
-                <h3 className="font-inter mb-4 font-medium text-white">Available Riders (Demo)</h3>
-                <div className="space-y-3 rounded-xl bg-black/60 p-4">
-                  {availableDrivers.map((driver) => (
-                    <button
-                      key={driver.id}
-                      onClick={() => handleDriverSelect(driver.id)}
-                      className={`flex w-full items-center justify-between rounded-lg border p-4 transition-all duration-200 ${
-                        selectedDriver === driver.id
-                          ? 'border-green-500 bg-green-500/20 text-green-400'
-                          : 'border-slate-600 bg-slate-800 text-white hover:border-green-500/50'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-orange-500">
-                          <Truck className="h-5 w-5 text-white" />
-                        </div>
-                        <div className="text-left">
-                          <p className="font-medium">{driver.name}</p>
-                          <div className="flex items-center gap-1 text-sm">
-                            <span className="text-yellow-400">★{driver.rating}</span>
-                            <span className="text-gray-400">({driver.distance})</span>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <p className="font-semibold">₦{driver.price.toLocaleString()}</p>
-                        <p className="text-xs text-gray-400">{driver.estimatedTime}</p>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
 
-          {/* Right Column - Info */}
+          {/* Right Column - Summary */}
           <div className="space-y-6">
-            {/* Pickup Information */}
-            <div className="rounded-xl border border-blue-500/20 bg-blue-500/10 p-6">
-              <div className="mb-4 flex items-center">
-                <div className="mr-2 flex h-6 w-6 items-center justify-center rounded-full bg-blue-500">
-                  <Info className="h-3 w-3 text-white" />
+            {/* Pickup Summary */}
+            <div className="rounded-xl border border-[#1DE9B633] bg-white/20 p-6 backdrop-blur-md">
+              <h3 className="font-space-grotesk mb-4 font-semibold text-green-400">
+                Pickup Summary
+              </h3>
+              <div className="font-inter space-y-3 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-300">Category:</span>
+                  <span className="font-medium text-white">{formData.category?.name}</span>
                 </div>
-                <h3 className="font-space-grotesk font-semibold text-blue-400">
-                  Testing Information
-                </h3>
+                <div className="flex justify-between">
+                  <span className="text-gray-300">Weight:</span>
+                  <span className="font-medium text-white">{formData.weight} kg</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-300">Vehicle Needed:</span>
+                  <span className="font-medium text-white">{vehicleType || 'Calculating...'}</span>
+                </div>
+                {selectedRider && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-300">Selected Rider:</span>
+                    <span className="font-medium text-green-400">
+                      {availableRiders.find((r) => r.riderId === selectedRider)?.name}
+                    </span>
+                  </div>
+                )}
               </div>
-              <ul className="font-inter space-y-2 text-sm">
-                <li className="text-gray-300">• This is demo pickup scheduling</li>
-                <li className="text-gray-300">• Just select any vehicle and driver</li>
-                <li className="text-gray-300">• Real pickup integration coming soon</li>
-                <li className="text-gray-300">• Focus is on blockchain recycling flow</li>
-              </ul>
             </div>
 
-            {/* Current Selection Summary */}
-            {selectedVehicle && selectedDriver && (
-              <div className="rounded-xl border border-green-500/20 bg-green-500/10 p-6">
-                <h3 className="font-space-grotesk mb-3 font-semibold text-green-400">
-                  Selection Summary
-                </h3>
-                <div className="font-inter space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-gray-300">Vehicle:</span>
-                    <span className="text-white">
-                      {vehicles.find((v) => v.id === selectedVehicle)?.name}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-300">Driver:</span>
-                    <span className="text-white">
-                      {availableDrivers.find((d) => d.id === selectedDriver)?.name}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-300">Ready to submit:</span>
-                    <span className="text-green-400">✅ Yes</span>
-                  </div>
-                </div>
+            {/* Estimated Earnings */}
+            <div className="rounded-xl border border-[#1DE9B633] bg-white/20 p-6 backdrop-blur-md">
+              <h3 className="font-space-grotesk mb-4 font-semibold text-green-400">
+                Estimated Earnings
+              </h3>
+              <div className="text-center">
+                <p className="font-space-grotesk text-3xl font-bold text-white">
+                  ₦
+                  {formData.category && formData.weight
+                    ? (parseFloat(formData.weight) * formData.category.rate).toFixed(2)
+                    : '0.00'}
+                </p>
+                <p className="font-inter mt-1 text-sm text-gray-400">
+                  Based on current market rates
+                </p>
               </div>
-            )}
+            </div>
           </div>
         </div>
 
@@ -358,22 +377,11 @@ export default function PickupSchedule({
             Back
           </button>
           <button
-            onClick={handleSubmit}
-            disabled={!isFormValid}
-            className={`font-inter flex items-center gap-2 rounded-lg px-6 py-3 font-semibold transition-all ${
-              isFormValid
-                ? 'gradient-button text-black hover:shadow-lg'
-                : 'cursor-not-allowed bg-gray-600 text-gray-400'
-            }`}
+            onClick={handleContinue}
+            disabled={!address || !selectedRider}
+            className="gradient-button font-inter rounded-xl px-6 py-3 font-semibold text-black transition-all hover:from-yellow-500 hover:to-green-600 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Submit Request
-            <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
-              <path
-                fillRule="evenodd"
-                d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                clipRule="evenodd"
-              />
-            </svg>
+            Continue to Confirmation →
           </button>
         </div>
       </div>
